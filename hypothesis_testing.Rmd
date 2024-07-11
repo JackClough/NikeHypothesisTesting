@@ -1,0 +1,667 @@
+---
+title: "Nike Trail Running Motivation"
+subtitle: "Hypothesis Testing Linear Regression Model"
+author: "Andrew Hauer"
+date: "11/16/2021"
+output: 
+  pdf_document :
+    keep_tex: true
+    number_sections: false
+    toc: true
+header-includes:
+ \usepackage{booktabs}
+ \usepackage{longtable}
+ \usepackage{array}
+ \usepackage{multirow}
+ \usepackage{wrapfig}
+ \usepackage{float}
+ \floatplacement{figure}{H}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message=FALSE, 
+                      warning=FALSE, error = FALSE,
+                      fig.pos = 'H')
+
+# import the libraries
+library(psych)
+library(GGally)
+library(corrplot)
+library(ggplot2)
+library(car)
+library(tidyverse)
+library(skimr)
+library(corrplot)
+library(knitr)
+library(kableExtra)
+```
+
+
+```{r}
+# import the data
+nike_survey <- read_csv("Nike.csv", show_col_types = FALSE)
+```
+
+```{r}
+# select the motivation data out of the nike survey transpose NAs to mean
+
+motivation <- nike_survey %>%
+  select("q8a_Changingscenery",                                      
+         "q8b_Onewithnature_thegreatoutdoors",                       
+         "q8c_Solitudegettingaway",                                  
+         "q8d_Adventureadrenaline",                                  
+         "q8e_Personalchallenge_thelastfrontier",         
+         "q8f_Fitnessgoodworkout",                                   
+         "q8g_Meetlikemindedpeople",                                 
+         "q9a_Gettinglost",                                          
+         "q9b_Possibilityofinjury",                                  
+         "q9c_Badchangingweather",                                   
+         "q9d_Dangerouswildlifeencounter",                           
+         "q9e_Dangerouspeopleencounter") %>% 
+  mutate(q8a_Changingscenery = replace_na(q8a_Changingscenery, mean(q8a_Changingscenery, na.rm =TRUE)),                                      
+         q8b_Onewithnature_thegreatoutdoors = replace_na(q8b_Onewithnature_thegreatoutdoors, 
+                                                         mean(q8b_Onewithnature_thegreatoutdoors, na.rm =TRUE)),                       
+         q8c_Solitudegettingaway = replace_na(q8c_Solitudegettingaway, 
+                                              mean(q8c_Solitudegettingaway, na.rm =TRUE)),                                  
+         q8d_Adventureadrenaline = replace_na(q8d_Adventureadrenaline, 
+                                              mean(q8d_Adventureadrenaline, na.rm =TRUE)),                                  
+         q8e_Personalchallenge_thelastfrontier = replace_na(q8e_Personalchallenge_thelastfrontier, 
+                                                            mean(q8e_Personalchallenge_thelastfrontier, na.rm =TRUE)),         
+         q8f_Fitnessgoodworkout = replace_na(q8f_Fitnessgoodworkout, 
+                                             mean(q8f_Fitnessgoodworkout, na.rm =TRUE)),                                   
+         q8g_Meetlikemindedpeople = replace_na(q8g_Meetlikemindedpeople, 
+                                               mean(q8g_Meetlikemindedpeople, na.rm =TRUE)),                                 
+         q9a_Gettinglost = replace_na(q9a_Gettinglost, 
+                                      mean(q9a_Gettinglost, na.rm =TRUE)),                                         
+         q9b_Possibilityofinjury = replace_na(q9b_Possibilityofinjury, 
+                                              mean(q9b_Possibilityofinjury, na.rm =TRUE)),                                  
+         q9c_Badchangingweather = replace_na(q9c_Badchangingweather, 
+                                             mean(q9c_Badchangingweather, na.rm =TRUE)),                                   
+         q9d_Dangerouswildlifeencounter = replace_na(q9d_Dangerouswildlifeencounter, 
+                                                     mean(q9d_Dangerouswildlifeencounter, na.rm =TRUE)),                           
+         q9e_Dangerouspeopleencounter = replace_na(q9e_Dangerouspeopleencounter, 
+                                                   mean(q9e_Dangerouspeopleencounter, na.rm =TRUE))) %>% 
+  rowwise() %>% 
+  mutate(getting_away = mean(c(q8a_Changingscenery, 
+                               q8b_Onewithnature_thegreatoutdoors, 
+                               q8c_Solitudegettingaway)),
+         adventure_challenge = mean(c(q8d_Adventureadrenaline,
+                                      q8e_Personalchallenge_thelastfrontier, 
+                                      q8g_Meetlikemindedpeople)),
+         lost_injured_weather = mean(c(q9a_Gettinglost, 
+                                       q9b_Possibilityofinjury, 
+                                       q9c_Badchangingweather)),
+         fitness = q8f_Fitnessgoodworkout,
+         wildlife = q9d_Dangerouswildlifeencounter,
+         people = q9e_Dangerouspeopleencounter) %>% 
+  select(getting_away, adventure_challenge, fitness, 
+         lost_injured_weather, wildlife, people)
+
+# make sure that the data is in a tibble
+motivation <- tibble('getting_away'= motivation$getting_away, 
+                     'adventure_challenge'= motivation$adventure_challenge, 
+                     'fitness'=motivation$fitness, 
+                     'lost_injured_badweather' = motivation$lost_injured_weather,
+                     'dangerous_wildlife' = motivation$wildlife,
+                     'dangerous_people' = motivation$people)
+```
+
+```{r}
+# add the average trail distance that runners run per week and the runners gender
+dis_mot <- tibble(trail_dist = nike_survey$q1_Runtrail,
+                  'getting_away'= motivation$getting_away, 
+                  'adventure_challenge'= motivation$adventure_challenge, 
+                  'fitness'=motivation$fitness, 
+                  'lost_injured_badweather' = motivation$lost_injured_badweather,
+                  'dangerous_wildlife' = motivation$dangerous_wildlife,
+                  'dangerous_people' = motivation$dangerous_people,
+                  gender=nike_survey$Gender)
+dis_mot <- dis_mot %>% 
+  mutate(trail_dist = replace_na(trail_dist, mean(trail_dist, na.rm =TRUE)))
+```
+
+```{r}
+# filter by gender and create a male and female distribution
+male_mot <- dis_mot %>% 
+  filter(gender==1) %>% 
+  select(trail_dist, getting_away,adventure_challenge, fitness,
+         lost_injured_badweather, dangerous_wildlife, dangerous_people)
+
+female_mot <- dis_mot %>% 
+  filter(gender==2) %>% 
+  select(trail_dist, getting_away, adventure_challenge, fitness,
+         lost_injured_badweather, dangerous_wildlife, dangerous_people)
+```
+
+```{r}
+# create the model store the summary
+# male linear model
+male_lm <- lm(trail_dist ~ adventure_challenge, data = male_mot)
+#summary(male_lm)
+
+male_fit <- lm(trail_dist ~ fitness, data= male_mot)
+
+# female linear model
+female_lm <- lm(trail_dist ~ adventure_challenge, data = female_mot)
+#summary(female_lm)
+
+female_fit <- lm(trail_dist ~ fitness, data = female_mot)
+
+# linear model that explores the difference between male and female runners
+dis_lm <- lm(trail_dist ~ adventure_challenge + fitness + gender, data = dis_mot)
+
+coef <- summary(dis_lm)$coef # store the summary coefficients
+r2 <- summary(dis_lm)$r.squared # store the R-square
+#summary(dis_lm)
+```
+
+\newpage
+# Introduction
+
+For this study I am interested in the differences in the motivation for trail 
+running between male and female trail runners. To measure motivation the Nike 
+Trail Running Survey used two questions. Question 1 relates to the *Values* trail
+runners find in trail running. The question, "To what extent do you find the 
+following motivating or of high value when running on trails?," is measured using
+7 metrics on a scale of 1 to 5. The scale 1 is, *"Not motivating at all"* and 5 
+is, *"Very motivating"*. The 7 metrics were reduced to 3 related factors in a
+previous report,
+
+1) *"Getting Away"*, This is the value of running to change scenery, become 
+"One-with-nature" or "The great outdoors, and enjoy the solitude of getting away.
+1) *"Adventure/Challenge"*, This is the value of running for adventure or adrenaline,
+running for personal challenge, and running to meet like minded people.
+1) *"Fitness"*, This is an un-factored value from the study the value of fitness 
+and getting a good workout.
+
+The second question describing trail runners Motivation had to do with the *Concerns*
+trail runners may experience. The question, "To what extent do you find the 
+following to be of concern when running on trails," is measured using 5 metrics
+on a scale of 1 to 5. The scale 1 is, *"No concern at all"* and 5 is, *"Very concerned"*.
+Again these 5 metrics wer reduced to 3 related factors in a previous report,
+
+1) *"Lost, Injured, or Bad Weather"*, This is the concern of getting lost while
+trail running, being injured, or running into bad weather while out on the trails.
+1) *"Dangerous Wildlife Encounter"*, This concern is an un-factored question regarding
+the concern trail runners have for running into dangerous wildlife while out on 
+the trails.
+1) *"Dangerous People Encounter"*, This concern again is an un-factored question
+regarding the concern trail runners have expressed for running into dangerous
+people while out running on trails.
+
+The motivation of trail runners was tested against the average distance trail
+runners reported running on trails per week. This distance is a self reported 
+average measured in miles by the trail runners taking this survey.
+
+# Question
+
+The question, "Is there a difference between male and female trail runner's
+motivation for trail running and how it relates to their average weekly trail
+running distance?"
+
+To answer this question, correlation between motivation and trail running 
+distance is measured to determine relationships between these values. After
+determining relationships, those relationships are further examined for significance
+in a linear regression model. 
+
+The null hypothesis, or the question that we are trying to disprove, is that
+there is no difference between male and female trail runners in how motivation
+relates to their average trail running distance.
+
+\newpage
+# Results
+
+## Correlation
+
+As discussed above the relationship between motivation and trail running distance
+of the surveyed trail runners was measured using a correlation matrix, of which 
+the output is shown in Figure 1. While this matrix does not take gender into
+consideration, measured with the linear regression, we can see that there is a
+positive relationship between trail running distance and Adventure/Challenge of 
+trail running. Negative relationships exist for fitness, and all of the motivation
+concerns for trail running. While we would expect concerns to have a negative
+relationship with the distance trail runners run per week, the negative relationship
+between trail running distance and fitness is unexpected and worth exploring.
+
+```{r fig.height=5, fig.width=7, fig.align= 'left',fig.cap="Shows the correlation of trail runner motivation and the average distance trail runners run per week."}
+# build the correlation matrix
+mot_cor_matrix <- dis_mot %>% 
+  mutate("Trail_Dist" = trail_dist,
+         "Getting_Away" = getting_away,
+         "Adventure_Challenge" = adventure_challenge,
+         "Fitness" = fitness,
+         "Lost_Injured_Weather" = lost_injured_badweather,
+         "Dangerous_Wildlife" = dangerous_wildlife,
+         "Dangerous_People" = dangerous_people) %>% 
+  select("Trail_Dist", "Getting_Away", "Adventure_Challenge", "Fitness",
+         "Lost_Injured_Weather", "Dangerous_Wildlife", "Dangerous_People") %>%
+  na.omit() %>% 
+  cor()
+
+# create a plot that shows the correlation matrix
+GGally::ggcorr(mot_cor_matrix,
+               geom = 'blank',
+               label = TRUE,
+               label_size=3,
+               hjust = .75,
+               size=3)+
+  geom_point(size = 9, aes(color = coefficient > 0, 
+                         alpha = abs(coefficient) >= 0.3))+
+  ggtitle('Correlation Matrix of Motivation and Trail Running Distance')+
+  scale_alpha_manual(values = c('TRUE' = 0.25, 'FALSE' = 0))+
+  guides(color = 'none', alpha = 'none')
+```
+
+## Linear Regression Model
+
+To answer our question about the differences in gender and motivation of these
+trail runners various linear regression models were run using varying patterns 
+of motivation to explain trail running average distance. Gender is used for each
+model because it is the primary difference we are trying to explain. 
+\newpage
+After testing the various models the following model was shown to have the greatest
+amount of significance describing trail running distance with at least a 90% 
+confidence threshold. The model of:
+
+$$y_{Trail\_Running\_ Distance} = b_{0} + b_{Adventure/Challenge} + b_{Fitness} + b_{Gender}$$
+
+In other words the Trail Running Distance is equal to the Trail Running Distance 
+intercept on the y axis plus the Estimate change of the Adventure/Challenge Value 
+plus the Estimate change for the Value of Fitness plus the Estimate change for 
+Gender. These estimates and intercepts are available in Table 1.
+
+```{r}
+# make a table of the linear model coef
+coef %>% 
+  kable(digits = 3, align = "c", 
+        col.names = c('Estimate', 'Std. Error', 't-value', 'p-value'),
+        caption="Trail Runner Average Distance by Motivation Linear Model Coefficients") %>%
+  kable_styling(latex_options=c('striped', 'hold_position'), full_width = TRUE, position = 'left') %>% 
+  column_spec(1, bold = TRUE) %>% 
+  row_spec(0, bold = TRUE)
+```
+
+The results of this model can be explained as, 
+
+* for a 1 unit change in the Value of Adventure/Challenge runners run an average 
+of 6.465 more miles per week if all other variables, fitness and gender (*male*), 
+are held equal.
+* for a 1 unit change in the Value of Fitness runners run an average of -3.226 
+less miles per week if all other variables, Adventure/Challenge and gender (*male*),
+are held equal.
+* if the gender is female rather than male runners run an average of -8.586 less
+miles per week if all other variables, Adventure/Challenge and running for fitness,
+are held equal.
+
+The Standard Error is the Residual Standard Error of the model in Table 1. 
+This tells us about the variation of the distribution of the actual data points 
+around the fit line of the model. Larger standard error values indicate greater 
+variation. This error is Residual Standard Error divided by the square root of 
+the sum of the square of that particular x variable. Residuals are the difference
+between the actual variable and the fit line of the model.
+
+The t-value is the estimate divided by the Standard Error. This value normalizes
+the variation in the model, and helps to understand the independence of each variable
+of the model.
+
+The p-value measures the significance of each variable. Because we are interested
+in a confidence measure of at least 90% for this model variables with p-values
+greater than 0.1 were removed from the model. 
+
+The $R^2$ value for this linear regression model is __`r round(r2, 2)`__. This
+indicates that the model explains `r round(r2, 2)*100`% of the trail runners average
+running distance per week given their motivation and whether they are male or 
+female runners. This is a strong value given the nature of the survey data.
+
+The results of this difference between male and female runners is more clearly
+seen in Figure 2. The figure shows the average distance trail runners run per week
+by the motivation value Adventure/Challenge. Male and female trend lines for this
+model are shown. We can see in this figure that while both male and female trends
+in distance increase with the value of Adventure/Challenge, male trends up at a 
+rate that is almost 3 times as great. The black trend line shows the overall trend
+in this data holding both male and female runners equal.
+
+```{r message=FALSE, error=FALSE, fig.height=6, fig.width=12, fig.cap="Shows the distribution of the average distance in miles that runners report running every week by the motivation value Adventure/Challenge for male and female runners."}
+# plot the average distance in miles that runners run per week by the motivation
+# value Adventure/Challenge for male and female runners
+
+dis_mot %>% 
+  na.omit() %>% 
+  ggplot(aes(x=adventure_challenge, y=trail_dist, color= factor(gender))) +
+    geom_jitter(size = 3, width = .25) +
+    scale_color_manual(values = c('lightblue3', 'indianred1'), 
+                       labels = c('Male', 'Female')) +
+    geom_smooth(method = 'lm', color = 'black', se=FALSE)+
+    geom_smooth(data = male_lm$model, aes(x = adventure_challenge, y = trail_dist),
+                method = "lm", color = "lightblue3", se = FALSE) +
+    geom_smooth(data = female_lm$model, aes(x = adventure_challenge, y = trail_dist),
+                method = "lm", color = "indianred1", se=FALSE) +
+    theme_classic() +
+    labs(x = "Adventure/Challenge", 
+         y = "Trail Running Avg. Dist. per Week (miles)",
+         title = "Trail Running Average Distance per Week",
+         subtitle = "By Motivation Value Adventure/Challenge by Gender",
+         color = 'Gender') +
+    theme(plot.title = element_text(size=14))
+    
+```
+
+When we look at the plot for males and female runners with average distance run
+per week by the motivation value of Fitness, Figure 3. We see that the trend line
+for both male and female runners is similarly negative, with the trend line for
+male runners starting at a higher intercept point. Again the black line indicates
+the trend line for the model when both male and female runners are not evaluated.
+
+```{r message=FALSE, error=FALSE, fig.height=6, fig.width=12, fig.cap="Shows the distribution of the average distance in miles that runners report running every week by the motivation value Fitness for male and female runners."}
+# plot the average distance in miles that runners run per week by the motivation
+# value Fitness for male and female runners
+
+dis_mot %>% 
+  na.omit() %>% 
+  ggplot(aes(x=fitness, y=trail_dist, color= factor(gender))) +
+    geom_jitter(size = 3, width = .25) +
+    scale_color_manual(values = c('lightblue3', 'indianred1'), 
+                       labels = c('Male', 'Female')) +
+    geom_smooth(method = 'lm', color = 'black', se = FALSE)+
+    geom_smooth(data = male_fit$model, aes(x = fitness, y = trail_dist),
+                method = "lm", color = "lightblue3", se = FALSE) +
+    geom_smooth(data = female_fit$model, aes(x = fitness, y = trail_dist),
+                method = "lm", color = "indianred1", se = FALSE) +
+    theme_classic() +
+    labs(x = "Fitness", 
+         y = "Trail Running Avg. Dist. per Week (miles)",
+         title = "Trail Running Average Distance per Week",
+         subtitle = "By Motivation Value Fitness by Gender",
+         color = 'Gender') +
+    theme(plot.title = element_text(size=14))
+    
+```
+
+Figure 4 shows the distribution of male and female runners by the distance they
+run on average per week. The figure is a violin plot which shows the strength
+of the distribution of data along the y-axis. The mean for each gender is denoted
+with a black line on the plot. 
+
+```{r message=FALSE, error=FALSE, fig.height=6, fig.width=8, fig.cap="Shows the distribution of the average distance in miles that runners report running every week by their gender."}
+# plot the average distance in miles that runners run per week by their gender
+
+dis_mot %>% 
+  na.omit() %>% 
+  ggplot(aes(x=gender, y=trail_dist, fill= factor(gender))) +
+    #geom_smooth(method = 'lm', color = 'black', se = FALSE)+
+    geom_violin(alpha = .25) +
+    geom_jitter(position = position_jitter(seed = 4, width = 0.2)) +
+    stat_summary(fun = "mean", geom = "crossbar", 
+               width = 0.5, colour = "black") +
+    scale_fill_manual(values = c('lightblue3', 'indianred1'), 
+                       labels = c('Male', 'Female')) +
+    geom_smooth(method = 'lm', color = 'black', se = FALSE)+
+    theme_classic() +
+    labs(x = "", 
+         y = "Trail Running Avg. Dist. per Week (miles)",
+         title = "Trail Running Average Distance per Week",
+         subtitle = "By Gender",
+         color = 'Gender') +
+    theme(plot.title = element_text(size=14),
+          legend.position = 'none')+
+    scale_x_continuous(breaks = c(1,2),
+                       labels = c("male", "female"))
+    
+```
+
+
+# Conclusion
+
+Indicated by our strong significance value, p-value = 0.002, for the gender value
+of this model it is safe to conclude that there is a difference between male and 
+female runners. We can therefore disprove the null hypothesis that there is no
+difference between male and female runners. In conclusion, we can say that there
+is a difference between male and female trail runner's motivation for trail running
+and how it relates to their average weekly trail running distance.
+
+\newpage
+
+# Appendix
+
+## Code
+```{r echo=TRUE, eval=FALSE}
+# import the libraries
+library(psych)
+library(GGally)
+library(corrplot)
+library(ggplot2)
+library(car)
+library(tidyverse)
+library(skimr)
+library(corrplot)
+library(knitr)
+library(kableExtra)
+
+# import the data
+nike_survey <- read_csv("Nike.csv", show_col_types = FALSE)
+
+# select the motivation data out of the nike survey transpose NAs to mean
+
+motivation <- nike_survey %>%
+  select("q8a_Changingscenery",                                      
+         "q8b_Onewithnature_thegreatoutdoors",                       
+         "q8c_Solitudegettingaway",                                  
+         "q8d_Adventureadrenaline",                                  
+         "q8e_Personalchallenge_thelastfrontier",         
+         "q8f_Fitnessgoodworkout",                                   
+         "q8g_Meetlikemindedpeople",                                 
+         "q9a_Gettinglost",                                          
+         "q9b_Possibilityofinjury",                                  
+         "q9c_Badchangingweather",                                   
+         "q9d_Dangerouswildlifeencounter",                           
+         "q9e_Dangerouspeopleencounter") %>% 
+  mutate(q8a_Changingscenery = replace_na(q8a_Changingscenery, 
+                                          mean(q8a_Changingscenery, 
+                                               na.rm =TRUE)),                                      
+         q8b_Onewithnature_thegreatoutdoors = replace_na(q8b_Onewithnature_thegreatoutdoors, 
+                                                         mean(q8b_Onewithnature_thegreatoutdoors, 
+                                                              na.rm =TRUE)),                       
+         q8c_Solitudegettingaway = replace_na(q8c_Solitudegettingaway, 
+                                              mean(q8c_Solitudegettingaway, 
+                                                   na.rm =TRUE)),                                  
+         q8d_Adventureadrenaline = replace_na(q8d_Adventureadrenaline, 
+                                              mean(q8d_Adventureadrenaline, 
+                                                   na.rm =TRUE)),                                  
+         q8e_Personalchallenge_thelastfrontier = replace_na(q8e_Personalchallenge_thelastfrontier, 
+                                                            mean(q8e_Personalchallenge_thelastfrontier, 
+                                                                 na.rm =TRUE)),         
+         q8f_Fitnessgoodworkout = replace_na(q8f_Fitnessgoodworkout, 
+                                             mean(q8f_Fitnessgoodworkout, 
+                                                  na.rm =TRUE)),                                   
+         q8g_Meetlikemindedpeople = replace_na(q8g_Meetlikemindedpeople, 
+                                               mean(q8g_Meetlikemindedpeople, 
+                                                    na.rm =TRUE)),                                 
+         q9a_Gettinglost = replace_na(q9a_Gettinglost, 
+                                      mean(q9a_Gettinglost, na.rm =TRUE)),                                         
+         q9b_Possibilityofinjury = replace_na(q9b_Possibilityofinjury, 
+                                              mean(q9b_Possibilityofinjury, 
+                                                   na.rm =TRUE)),                                  
+         q9c_Badchangingweather = replace_na(q9c_Badchangingweather, 
+                                             mean(q9c_Badchangingweather, 
+                                                  na.rm =TRUE)),                                   
+         q9d_Dangerouswildlifeencounter = replace_na(q9d_Dangerouswildlifeencounter, 
+                                                     mean(q9d_Dangerouswildlifeencounter, 
+                                                          na.rm =TRUE)),                           
+         q9e_Dangerouspeopleencounter = replace_na(q9e_Dangerouspeopleencounter, 
+                                                   mean(q9e_Dangerouspeopleencounter, 
+                                                        na.rm =TRUE))) %>% 
+  rowwise() %>% 
+  mutate(getting_away = mean(c(q8a_Changingscenery, 
+                               q8b_Onewithnature_thegreatoutdoors, 
+                               q8c_Solitudegettingaway)),
+         adventure_challenge = mean(c(q8d_Adventureadrenaline,
+                                      q8e_Personalchallenge_thelastfrontier, 
+                                      q8g_Meetlikemindedpeople)),
+         lost_injured_weather = mean(c(q9a_Gettinglost, 
+                                       q9b_Possibilityofinjury, 
+                                       q9c_Badchangingweather)),
+         fitness = q8f_Fitnessgoodworkout,
+         wildlife = q9d_Dangerouswildlifeencounter,
+         people = q9e_Dangerouspeopleencounter) %>% 
+  select(getting_away, adventure_challenge, fitness, 
+         lost_injured_weather, wildlife, people)
+
+# make sure that the data is in a tibble
+motivation <- tibble('getting_away'= motivation$getting_away, 
+                     'adventure_challenge'= motivation$adventure_challenge, 
+                     'fitness'=motivation$fitness, 
+                     'lost_injured_badweather' = motivation$lost_injured_weather,
+                     'dangerous_wildlife' = motivation$wildlife,
+                     'dangerous_people' = motivation$people)
+
+# add the average trail distance that runners run per week and the runners gender
+dis_mot <- tibble(trail_dist = nike_survey$q1_Runtrail,
+                  'getting_away'= motivation$getting_away, 
+                  'adventure_challenge'= motivation$adventure_challenge, 
+                  'fitness'=motivation$fitness, 
+                  'lost_injured_badweather' = motivation$lost_injured_badweather,
+                  'dangerous_wildlife' = motivation$dangerous_wildlife,
+                  'dangerous_people' = motivation$dangerous_people,
+                  gender=nike_survey$Gender)
+dis_mot <- dis_mot %>% 
+  mutate(trail_dist = replace_na(trail_dist, mean(trail_dist, na.rm =TRUE)))
+
+# filter by gender and create a male and female distribution
+male_mot <- dis_mot %>% 
+  filter(gender==1) %>% 
+  select(trail_dist, getting_away,adventure_challenge, fitness,
+         lost_injured_badweather, dangerous_wildlife, dangerous_people)
+
+female_mot <- dis_mot %>% 
+  filter(gender==2) %>% 
+  select(trail_dist, getting_away, adventure_challenge, fitness,
+         lost_injured_badweather, dangerous_wildlife, dangerous_people)
+
+# create the model store the summary
+# male linear model
+male_lm <- lm(trail_dist ~ adventure_challenge, data = male_mot)
+#summary(male_lm)
+
+male_fit <- lm(trail_dist ~ fitness, data= male_mot)
+
+# female linear model
+female_lm <- lm(trail_dist ~ adventure_challenge, data = female_mot)
+#summary(female_lm)
+
+female_fit <- lm(trail_dist ~ fitness, data = female_mot)
+
+# linear model that explores the difference between male and female runners
+dis_lm <- lm(trail_dist ~ adventure_challenge + fitness + gender, data = dis_mot)
+
+coef <- summary(dis_lm)$coef # store the summary coefficients
+r2 <- summary(dis_lm)$r.squared # store the R-square
+#summary(dis_lm)
+
+# build the correlation matrix
+mot_cor_matrix <- dis_mot %>% 
+  mutate("Trail_Dist" = trail_dist,
+         "Getting_Away" = getting_away,
+         "Adventure_Challenge" = adventure_challenge,
+         "Fitness" = fitness,
+         "Lost_Injured_Weather" = lost_injured_badweather,
+         "Dangerous_Wildlife" = dangerous_wildlife,
+         "Dangerous_People" = dangerous_people) %>% 
+  select("Trail_Dist", "Getting_Away", "Adventure_Challenge", "Fitness",
+         "Lost_Injured_Weather", "Dangerous_Wildlife", "Dangerous_People") %>%
+  na.omit() %>% 
+  cor()
+
+# create a plot that shows the correlation matrix
+GGally::ggcorr(mot_cor_matrix,
+               geom = 'blank',
+               label = TRUE,
+               label_size=3,
+               hjust = .75,
+               size=3)+
+  geom_point(size = 9, aes(color = coefficient > 0, 
+                         alpha = abs(coefficient) >= 0.3))+
+  ggtitle('Correlation Matrix of Motivation and Trail Running Distance')+
+  scale_alpha_manual(values = c('TRUE' = 0.25, 'FALSE' = 0))+
+  guides(color = 'none', alpha = 'none')
+
+# make a table of the linear model coef
+coef %>% 
+  kable(digits = 3, align = "c", 
+        col.names = c('Estimate', 'Std. Error', 't-value', 'p-value'),
+        caption= "Trail Runner Average Distance by Motivation Linear Model Coefficients") %>%
+  kable_styling(latex_options=c('striped', 'hold_position'), full_width = TRUE, 
+                position = 'left') %>% 
+  column_spec(1, bold = TRUE) %>% 
+  row_spec(0, bold = TRUE)
+
+# plot the average distance in miles that runners run per week by the motivation
+# value Adventure/Challenge for male and female runners
+
+dis_mot %>% 
+  na.omit() %>% 
+  ggplot(aes(x=adventure_challenge, y=trail_dist, color= factor(gender))) +
+    geom_jitter(size = 3, width = .25) +
+    scale_color_manual(values = c('lightblue3', 'indianred1'), 
+                       labels = c('Male', 'Female')) +
+    geom_smooth(method = 'lm', color = 'black', se=FALSE)+
+    geom_smooth(data = male_lm$model, aes(x = adventure_challenge, 
+                                          y = trail_dist),
+                method = "lm", color = "lightblue3", se = FALSE) +
+    geom_smooth(data = female_lm$model, aes(x = adventure_challenge, 
+                                            y = trail_dist),
+                method = "lm", color = "indianred1", se=FALSE) +
+    theme_classic() +
+    labs(x = "Adventure/Challenge", 
+         y = "Trail Running Avg. Dist. per Week (miles)",
+         title = "Trail Running Average Distance per Week",
+         subtitle = "By Motivation Value Adventure/Challenge by Gender",
+         color = 'Gender') +
+    theme(plot.title = element_text(size=14))
+
+# plot the average distance in miles that runners run per week by the motivation
+# value Fitness for male and female runners
+
+dis_mot %>% 
+  na.omit() %>% 
+  ggplot(aes(x=fitness, y=trail_dist, color= factor(gender))) +
+    geom_jitter(size = 3, width = .25) +
+    scale_color_manual(values = c('lightblue3', 'indianred1'), 
+                       labels = c('Male', 'Female')) +
+    geom_smooth(method = 'lm', color = 'black', se = FALSE)+
+    geom_smooth(data = male_fit$model, aes(x = fitness, y = trail_dist),
+                method = "lm", color = "lightblue3", se = FALSE) +
+    geom_smooth(data = female_fit$model, aes(x = fitness, y = trail_dist),
+                method = "lm", color = "indianred1", se = FALSE) +
+    theme_classic() +
+    labs(x = "Fitness", 
+         y = "Trail Running Avg. Dist. per Week (miles)",
+         title = "Trail Running Average Distance per Week",
+         subtitle = "By Motivation Value Fitness by Gender",
+         color = 'Gender') +
+    theme(plot.title = element_text(size=14))
+
+# plot the average distance in miles that runners run per week by their gender
+
+dis_mot %>% 
+  na.omit() %>% 
+  ggplot(aes(x=gender, y=trail_dist, fill= factor(gender))) +
+    #geom_smooth(method = 'lm', color = 'black', se = FALSE)+
+    geom_violin(alpha = .25) +
+    geom_jitter(position = position_jitter(seed = 4, width = 0.2)) +
+    stat_summary(fun = "mean", geom = "crossbar", 
+               width = 0.5, colour = "black") +
+    scale_fill_manual(values = c('lightblue3', 'indianred1'), 
+                       labels = c('Male', 'Female')) +
+    geom_smooth(method = 'lm', color = 'black', se = FALSE)+
+    theme_classic() +
+    labs(x = "", 
+         y = "Trail Running Avg. Dist. per Week (miles)",
+         title = "Trail Running Average Distance per Week",
+         subtitle = "By Gender",
+         color = 'Gender') +
+    theme(plot.title = element_text(size=14),
+          legend.position = 'none')+
+    scale_x_continuous(breaks = c(1,2),
+                       labels = c("male", "female"))
+```
+
